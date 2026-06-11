@@ -251,12 +251,24 @@ body{margin:0;font-family:-apple-system,"Segoe UI",sans-serif;background:var(--p
 
 <!-- MAP PICKER -->
 <div id="mapPickerModal" class="sheet hidden">
-  <div class="sheet-card" style="height:82vh;display:flex;flex-direction:column;border-radius:24px 24px 0 0;overflow:hidden">
-    <div class="sheet-head">Pick Location<button class="x" onclick="closeMapPicker()">✕</button></div>
+  <div class="sheet-card" style="height:88vh;display:flex;flex-direction:column;border-radius:24px 24px 0 0;overflow:hidden">
+    <div class="sheet-head" style="flex-direction:column;align-items:stretch;gap:8px;padding-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700">Pick Location</span>
+        <button class="x" onclick="closeMapPicker()">✕</button>
+      </div>
+      <div style="position:relative">
+        <input id="mapSearchInput" type="search" placeholder="Search place, landmark..." autocomplete="off"
+          oninput="onMapSearch(this.value)"
+          style="width:100%;padding:9px 12px 9px 34px;border:1.5px solid var(--pink-soft);border-radius:12px;font-size:14px;font-family:inherit;background:var(--pink-bg);outline:none;color:var(--ink)">
+        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:14px;pointer-events:none">🔍</span>
+        <div id="mapSearchResults" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.15);z-index:9999;max-height:200px;overflow-y:auto;display:none"></div>
+      </div>
+    </div>
     <div id="mapPickerMap" style="flex:1;min-height:0"></div>
-    <div style="padding:12px 16px calc(16px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--pink-soft)">
-      <div id="mapPickerCoords" style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:10px">Tap on map to drop a pin</div>
-      <button id="mapPickerConfirm" onclick="confirmMapPicker()" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--pink);color:#fff;font-size:15px;font-weight:600;cursor:pointer" disabled>Confirm</button>
+    <div style="padding:10px 16px calc(14px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--pink-soft)">
+      <div id="mapPickerCoords" style="font-size:12px;color:var(--muted);text-align:center;margin-bottom:8px">Tap on map to drop a pin</div>
+      <button id="mapPickerConfirm" onclick="confirmMapPicker()" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--pink);color:#fff;font-size:15px;font-weight:600;cursor:pointer" disabled>Confirm Location</button>
     </div>
   </div>
 </div>
@@ -332,7 +344,7 @@ window.addEventListener('load',()=>{
 window.addEventListener('popstate',()=>{
   // close overlays from top to bottom
   if(!document.getElementById('lightbox').classList.contains('hidden')){closeLightbox(false);history.pushState({app:true},'');return;}
-  if(!document.getElementById('mapPickerModal').classList.contains('hidden')){closeMapPicker(false);history.pushState({app:true},'');return;}
+  if(!document.getElementById('mapPickerModal').classList.contains('hidden')){document.getElementById('mapPickerModal').classList.add('hidden');history.pushState({modal:'editor'},'');return;}
   if(!document.getElementById('dayModal').classList.contains('hidden')){closeDayModal(false);history.pushState({app:true},'');return;}
   if(!document.getElementById('editor').classList.contains('hidden')){closeEditor(false);history.pushState({app:true},'');return;}
   if(!document.getElementById('detail').classList.contains('hidden')){closeDetail(false);history.pushState({app:true},'');return;}
@@ -728,56 +740,100 @@ function clearGps(){
 }
 
 // ── Map Picker ──
-let _pickerMap=null,_pickerMarker=null,_pickerLat=null,_pickerLng=null;
+let _pickerMap=null,_pickerMarker=null,_pickerLat=null,_pickerLng=null,_searchTimer=null;
+
 async function openMapPicker(){
-  document.getElementById('mapPickerModal').classList.remove('hidden');
-  document.getElementById('mapPickerConfirm').disabled=true;
+  _pickerLat=null;_pickerLng=null;
   document.getElementById('mapPickerCoords').textContent='Tap on map to drop a pin';
+  document.getElementById('mapPickerConfirm').disabled=true;
+  document.getElementById('mapSearchInput').value='';
+  document.getElementById('mapSearchResults').style.display='none';
+  document.getElementById('mapPickerModal').classList.remove('hidden');
   history.pushState({modal:'mapPicker'},'');
   await loadLeaflet();
   setTimeout(()=>{
     if(!_pickerMap){
       _pickerMap=L.map('mapPickerMap',{zoomControl:true});
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(_pickerMap);
-      _pickerMap.on('click',e=>{
-        _pickerLat=e.latlng.lat;_pickerLng=e.latlng.lng;
-        if(_pickerMarker)_pickerMarker.setLatLng(e.latlng);
-        else _pickerMarker=L.marker(e.latlng,{draggable:true}).addTo(_pickerMap);
-        _pickerMarker.on('dragend',ev=>{
-          _pickerLat=ev.target.getLatLng().lat;_pickerLng=ev.target.getLatLng().lng;
-          document.getElementById('mapPickerCoords').textContent=`${_pickerLat.toFixed(5)}, ${_pickerLng.toFixed(5)}`;
-        });
-        document.getElementById('mapPickerCoords').textContent=`${_pickerLat.toFixed(5)}, ${_pickerLng.toFixed(5)}`;
-        document.getElementById('mapPickerConfirm').disabled=false;
-      });
+      _pickerMap.on('click',e=>pickerPlacePin(e.latlng.lat,e.latlng.lng));
     }
-    // ถ้ามีพิกัดเดิมอยู่แล้ว ให้เด้งไปที่นั่น
     const curLat=+document.getElementById('f_lat').value;
     const curLng=+document.getElementById('f_lng').value;
     if(curLat&&curLng){
-      _pickerMap.setView([curLat,curLng],14);
-      _pickerLat=curLat;_pickerLng=curLng;
-      if(_pickerMarker)_pickerMarker.setLatLng([curLat,curLng]);
-      else _pickerMarker=L.marker([curLat,curLng],{draggable:true}).addTo(_pickerMap);
-      document.getElementById('mapPickerCoords').textContent=`${curLat.toFixed(5)}, ${curLng.toFixed(5)}`;
-      document.getElementById('mapPickerConfirm').disabled=false;
-    } else {
-      // เด้งไปประเทศไทยเป็น default
+      _pickerMap.setView([curLat,curLng],15);
+      pickerPlacePin(curLat,curLng);
+    }else{
       _pickerMap.setView([13.7563,100.5018],6);
+      if(_pickerMarker){_pickerMarker.remove();_pickerMarker=null;}
     }
     _pickerMap.invalidateSize();
-  },100);
+  },120);
 }
-function closeMapPicker(pushState=true){
-  document.getElementById('mapPickerModal').classList.add('hidden');
-  if(pushState)history.back();
+
+function pickerPlacePin(lat,lng){
+  _pickerLat=lat;_pickerLng=lng;
+  const ll=L.latLng(lat,lng);
+  if(_pickerMarker)_pickerMarker.setLatLng(ll);
+  else{
+    _pickerMarker=L.marker(ll,{draggable:true}).addTo(_pickerMap);
+    _pickerMarker.on('dragend',ev=>{
+      const p=ev.target.getLatLng();
+      _pickerLat=p.lat;_pickerLng=p.lng;
+      updatePickerCoords();
+    });
+  }
+  updatePickerCoords();
+  document.getElementById('mapPickerConfirm').disabled=false;
 }
+
+function updatePickerCoords(){
+  document.getElementById('mapPickerCoords').textContent=`📍 ${_pickerLat.toFixed(5)}, ${_pickerLng.toFixed(5)}`;
+}
+
+// Nominatim search (OSM geocoding — ฟรี ไม่ต้อง API key)
+function onMapSearch(q){
+  clearTimeout(_searchTimer);
+  const box=document.getElementById('mapSearchResults');
+  if(!q.trim()){box.style.display='none';return;}
+  _searchTimer=setTimeout(async()=>{
+    try{
+      const res=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&accept-language=th,en`,
+        {headers:{'User-Agent':'BDJourney-App/1.0'}});
+      const items=await res.json();
+      if(!items.length){box.innerHTML='<div style="padding:12px;text-align:center;color:var(--muted);font-size:13px">No results</div>';box.style.display='block';return;}
+      box.innerHTML=items.map(r=>`
+        <div onclick="pickerSelectResult(${r.lat},${r.lon},this)"
+          style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--pink-bg);font-size:13px;line-height:1.4">
+          <div style="font-weight:600;color:var(--ink)">${esc(r.display_name.split(',')[0])}</div>
+          <div style="color:var(--muted);font-size:11px">${esc(r.display_name.split(',').slice(1,3).join(','))}</div>
+        </div>`).join('');
+      box.style.display='block';
+    }catch(e){box.style.display='none';}
+  },400);
+}
+
+function pickerSelectResult(lat,lng,el){
+  document.getElementById('mapSearchResults').style.display='none';
+  document.getElementById('mapSearchInput').value=el.querySelector('div').textContent;
+  _pickerMap.setView([+lat,+lng],15);
+  pickerPlacePin(+lat,+lng);
+}
+
+// ปิด search dropdown เมื่อแตะนอก
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#mapSearchInput')&&!e.target.closest('#mapSearchResults'))
+    document.getElementById('mapSearchResults').style.display='none';
+});
+
+// closeMapPicker ไม่ซ่อน modal เอง — ให้ popstate เป็นคนซ่อน
+function closeMapPicker(){history.back();}
+
 function confirmMapPicker(){
   if(_pickerLat===null)return;
   document.getElementById('f_lat').value=_pickerLat;
   document.getElementById('f_lng').value=_pickerLng;
   setGpsLabel(_pickerLat,_pickerLng);
-  closeMapPicker();
+  history.back(); // popstate จะซ่อน modal แล้วกลับไป editor
 }
 </script>
 </body>
