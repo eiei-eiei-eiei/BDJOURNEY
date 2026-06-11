@@ -101,6 +101,20 @@ body{margin:0;font-family:-apple-system,"Segoe UI","Sukhumvit Set","Noto Sans Th
 /* day entries list */
 .day-entry{background:var(--pink-bg);border-radius:14px;padding:14px;margin-bottom:10px;cursor:pointer}
 .day-entry:active{opacity:.85}
+/* search */
+.search-bar{overflow:hidden;max-height:0;transition:max-height .25s ease;background:rgba(255,245,247,.95);backdrop-filter:blur(8px);position:sticky;top:calc(48px + env(safe-area-inset-top));z-index:9}
+.search-bar.open{max-height:60px}
+.search-inner{display:flex;align-items:center;gap:8px;padding:8px 16px}
+.search-inner input{flex:1;border:1px solid var(--pink-soft);border-radius:20px;padding:8px 14px;font-size:15px;font-family:inherit;background:#fff;outline:none}
+.search-inner input:focus{border-color:var(--pink)}
+.search-clear{border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer;padding:4px}
+.search-icon{border:none;background:none;font-size:20px;cursor:pointer;color:var(--muted);padding:4px}
+.search-icon.active{color:var(--pink)}
+/* calendar scroll */
+.cal-jump{display:flex;gap:8px;margin-bottom:14px}
+.cal-jump select{flex:1;padding:8px 10px;border:1px solid var(--pink-soft);border-radius:12px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink);appearance:none;text-align:center}
+.cal-month-block{margin-bottom:24px;scroll-margin-top:12px}
+.cal-month-label{font-weight:700;font-size:15px;margin-bottom:8px;color:var(--ink)}
 /* story bar */
 .story-bar{display:flex;gap:12px;overflow-x:auto;padding:4px 16px 12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .story-bar::-webkit-scrollbar{display:none}
@@ -156,7 +170,16 @@ body{margin:0;font-family:-apple-system,"Segoe UI","Sukhumvit Set","Noto Sans Th
 
 <!-- APP -->
 <div id="app" class="app hidden">
-  <header class="topbar"><div class="brand">💗 BDJourney</div></header>
+  <header class="topbar">
+    <div class="brand">💗 BDJourney</div>
+    <button class="search-icon" id="searchToggle" onclick="toggleSearch()">🔍</button>
+  </header>
+  <div class="search-bar" id="searchBar">
+    <div class="search-inner">
+      <input type="search" id="searchInput" placeholder="ค้นหาใน entries..." oninput="onSearch(this.value)">
+      <button class="search-clear" onclick="clearSearch()">✕</button>
+    </div>
+  </div>
   <main id="view" class="view"></main>
   <button class="fab" onclick="openEditor()">＋</button>
   <nav class="tabbar">
@@ -226,7 +249,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwbI25zmbvKOPQZtGttN_0v
 
 // ====== STATE ======
 const state={token:null,pin:'',entries:[],newPhotos:[],existing:[],editId:null,mood:'',
-  calMonth:new Date().getMonth(),calYear:new Date().getFullYear(),tab:'timeline',detailId:null};
+  calMonth:new Date().getMonth(),calYear:new Date().getFullYear(),tab:'timeline',detailId:null,searchQuery:''};
 
 // ====== API ======
 async function apiGet(action,params={}){
@@ -341,15 +364,22 @@ async function renderTimeline(){
   const v=document.getElementById('view');
   if(!state.entries.length){v.innerHTML=emptyHtml('📖','ยังไม่มีบันทึก','กด "＋" เพื่อเริ่มเรื่องราวของเรา');return;}
 
-  // story bar throwback (โหลดพร้อมกัน ไม่บล็อก render)
-  const storyHtml=`<div id="storyBar" class="story-bar"><div class="story-item" onclick="openEditor()">
+  const q=state.searchQuery.toLowerCase();
+  const filtered=q?state.entries.filter(e=>
+    (e.title||'').toLowerCase().includes(q)||(e.body||'').toLowerCase().includes(q)
+  ):state.entries;
+
+  if(q&&!filtered.length){v.innerHTML=emptyHtml('🔍','ไม่พบผลลัพธ์',`ไม่มีบันทึกที่ตรงกับ "${esc(state.searchQuery)}"`);return;}
+
+  // story bar (ซ่อนเมื่อค้นหาอยู่)
+  const storyHtml=q?'': `<div id="storyBar" class="story-bar"><div class="story-item" onclick="openEditor()">
     <div class="story-ring"><div class="story-emoji">＋</div></div>
     <span class="story-label">บันทึก</span>
   </div></div>`;
 
   // จัดกลุ่มตามวัน
   const groups={};
-  state.entries.forEach(e=>{
+  filtered.forEach(e=>{
     const d=isoDate(e.entryDate);
     if(!groups[d]) groups[d]=[];
     groups[d].push(e);
@@ -389,7 +419,11 @@ async function loadThrowbackStories(){
 }
 
 function entryCard(e){
-  const firstPhoto=e.photoIds&&e.photoIds.length?`<img class="entry-thumb" data-photo="${e.photoIds[0]}" alt="">`:'';
+  const n=e.photoIds&&e.photoIds.length;
+  const thumb=n?`<div style="position:relative;flex-shrink:0">
+    <img class="entry-thumb" data-photo="${e.photoIds[0]}" alt="">
+    ${n>1?`<div style="position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;font-weight:700;padding:2px 5px;border-radius:8px;display:flex;align-items:center;gap:2px"><span style="font-size:9px">⊞</span>${n}</div>`:''}
+  </div>`:'';
   return `<div class="entry" onclick="openDetail('${e.id}')">
     <div style="display:flex;gap:12px;align-items:flex-start">
       <div style="flex:1;min-width:0">
@@ -398,7 +432,7 @@ function entryCard(e){
         ${e.body?`<div class="entry-body">${esc(e.body)}</div>`:''}
         ${e.location?`<div class="entry-meta">📍 ${esc(e.location)}</div>`:''}
       </div>
-      ${firstPhoto}
+      ${thumb}
     </div>
   </div>`;
 }
@@ -445,38 +479,58 @@ async function removeEntryFromDetail(id){
 
 // ====== CALENDAR ======
 function renderCalendar(){
-  const v=document.getElementById('view');const y=state.calYear,m=state.calMonth;
+  const v=document.getElementById('view');
   const mn=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
-  // map วัน → entry แรกของวัน (เพื่อเอา photo thumbnail)
-  const byDay={};
-  state.entries.forEach(e=>{
-    const d=isoDate(e.entryDate);
-    const p=d.split('-');
-    if(+p[0]===y&&+p[1]===m+1){
-      const day=+p[2];
-      if(!byDay[day]) byDay[day]={entries:[],firstPhoto:e.photoIds&&e.photoIds.length?e.photoIds[0]:null};
-      byDay[day].entries.push(e);
+  const dows=['อา','จ','อ','พ','พฤ','ศ','ส'];
+  const today=todayIso(), nowY=new Date().getFullYear();
+  const years=new Set(state.entries.map(e=>+isoDate(e.entryDate).split('-')[0]));
+  years.add(nowY);
+  const minY=Math.min(...years), maxY=nowY+1;
+  const yearRange=Array.from({length:maxY-minY+1},(_,i)=>minY+i);
+  const monthOpts=mn.map((n,i)=>`<option value="${i}"${i===state.calMonth?' selected':''}>${n}</option>`).join('');
+  const yearOpts=yearRange.map(y=>`<option value="${y}"${y===state.calYear?' selected':''}>${y+543}</option>`).join('');
+  let monthsHtml='';
+  for(let m=0;m<12;m++){
+    const byDay={};
+    state.entries.forEach(e=>{
+      const d=isoDate(e.entryDate),p=d.split('-');
+      if(+p[0]===state.calYear&&+p[1]===m+1){
+        const day=+p[2];
+        if(!byDay[day]) byDay[day]={firstPhoto:e.photoIds&&e.photoIds.length?e.photoIds[0]:null};
+      }
+    });
+    const first=new Date(state.calYear,m,1).getDay(),days=new Date(state.calYear,m+1,0).getDate();
+    let c=dows.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+    for(let i=0;i<first;i++)c+=`<div class="cal-cell blank"></div>`;
+    for(let d=1;d<=days;d++){
+      const info=byDay[d],iso=state.calYear+'-'+pad(m+1)+'-'+pad(d),isToday=iso===today;
+      if(info){
+        c+=`<div class="cal-cell has${isToday?' today':''}" onclick="openDay(${state.calYear},${m+1},${d})">
+          ${info.firstPhoto?`<img data-photo="${info.firstPhoto}" alt="">`:''}
+          <span class="cal-num">${d}</span></div>`;
+      } else {
+        c+=`<div class="cal-cell${isToday?' today':''}">${d}</div>`;
+      }
     }
-  });
-  const first=new Date(y,m,1).getDay(),days=new Date(y,m+1,0).getDate();
-  const today=todayIso(),dows=['อา','จ','อ','พ','พฤ','ศ','ส'];
-  let c=dows.map(d=>`<div class="cal-dow">${d}</div>`).join('');
-  for(let i=0;i<first;i++)c+=`<div class="cal-cell blank"></div>`;
-  for(let d=1;d<=days;d++){
-    const info=byDay[d];
-    const iso=y+'-'+pad(m+1)+'-'+pad(d);
-    const isToday=iso===today;
-    if(info){
-      const thumb=info.firstPhoto?`<img data-photo="${info.firstPhoto}" alt="">`:''
-      c+=`<div class="cal-cell has${isToday?' today':''}" onclick="openDay(${y},${m+1},${d})">${thumb}<span class="cal-num">${d}</span></div>`;
-    } else {
-      c+=`<div class="cal-cell${isToday?' today':''}">${d}</div>`;
-    }
+    monthsHtml+=`<div class="cal-month-block" id="cal-m-${m}">
+      <div class="cal-month-label">${mn[m]} ${state.calYear+543}</div>
+      <div class="cal-grid">${c}</div>
+    </div>`;
   }
-  v.innerHTML=`<div class="cal-head"><button onclick="calMove(-1)">‹</button><strong>${mn[m]} ${y+543}</strong><button onclick="calMove(1)">›</button></div><div class="cal-grid">${c}</div>`;
+  v.innerHTML=`<div class="cal-jump">
+    <select onchange="state.calMonth=+this.value;jumpCalMonth()">${monthOpts}</select>
+    <select onchange="state.calYear=+this.value;renderCalendar()">${yearOpts}</select>
+  </div>${monthsHtml}`;
   hydratePhotos(v);
+  requestAnimationFrame(()=>{
+    const el=document.getElementById('cal-m-'+state.calMonth);
+    if(el) el.scrollIntoView({behavior:'auto',block:'start'});
+  });
 }
-function calMove(d){state.calMonth+=d;if(state.calMonth<0){state.calMonth=11;state.calYear--;}if(state.calMonth>11){state.calMonth=0;state.calYear++;}renderCalendar();}
+function jumpCalMonth(){
+  const el=document.getElementById('cal-m-'+state.calMonth);
+  if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+}
 function openDay(y,m,d){
   const iso=y+'-'+pad(m)+'-'+pad(d);
   const entries=state.entries.filter(e=>isoDate(e.entryDate)===iso);
@@ -607,6 +661,27 @@ async function saveEntry(){
   try{await apiPost(payload.id?'updateEntry':'addEntry',payload);closeEditor();await loadAll();toast('บันทึกแล้ว 💕');}
   catch(e){fail(e);}finally{document.getElementById('saveBtn').disabled=false;showLoading(false);}
 }
+// ====== SEARCH ======
+function toggleSearch(){
+  const bar=document.getElementById('searchBar');
+  const isOpen=bar.classList.toggle('open');
+  document.getElementById('searchToggle').classList.toggle('active',isOpen);
+  if(isOpen) setTimeout(()=>document.getElementById('searchInput').focus(),260);
+  else clearSearch();
+}
+function clearSearch(){
+  document.getElementById('searchInput').value='';
+  document.getElementById('searchBar').classList.remove('open');
+  document.getElementById('searchToggle').classList.remove('active');
+  state.searchQuery='';
+  if(state.tab==='timeline') renderTimeline();
+}
+function onSearch(q){
+  state.searchQuery=q.trim();
+  if(state.tab!=='timeline') switchTab('timeline');
+  else renderTimeline();
+}
+
 // ====== ATLAS ======
 let _leafletLoaded=false;
 async function loadLeaflet(){
