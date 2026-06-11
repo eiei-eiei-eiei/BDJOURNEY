@@ -1,0 +1,13 @@
+# clasp credentials (ข้อมูลล็อกอิน Google — ห้ามขึ้น git เด็ดขาด)
+.clasprc.json
+.clasp.json
+
+# dependencies
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
