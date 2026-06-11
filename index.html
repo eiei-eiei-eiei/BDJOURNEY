@@ -808,7 +808,8 @@ async function saveEntry(){
     location:document.getElementById('f_location').value,mood:state.mood,weather:'',
     lat:document.getElementById('f_lat').value||null,lng:document.getElementById('f_lng').value||null,
     photos:state.newPhotos.filter(Boolean)};
-  if(!payload.body&&!payload.title&&!payload.photos.length){toast('Write something first 💕');return;}
+  const hasExisting=state.existing&&state.existing.length;
+  if(!payload.body&&!payload.title&&!payload.location&&!payload.photos.length&&!hasExisting){toast('Add something first 💕');return;}
   showLoading(true);document.getElementById('saveBtn').disabled=true;
   try{await apiPost(payload.id?'updateEntry':'addEntry',payload);closeEditor();await loadAll();toast('Saved 💕');}
   catch(e){fail(e);}finally{document.getElementById('saveBtn').disabled=false;showLoading(false);}
