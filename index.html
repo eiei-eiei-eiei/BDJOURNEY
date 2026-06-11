@@ -190,10 +190,10 @@ body{margin:0;font-family:-apple-system,"Segoe UI",sans-serif;background:var(--p
     <div id="pinDots" class="pin-dots"><span></span><span></span><span></span><span></span><span></span><span></span></div>
     <div id="pinError" class="pin-error"></div>
     <div class="keypad">
-      <button onclick="pinPress('1')">1</button><button onclick="pinPress('2')">2</button><button onclick="pinPress('3')">3</button>
-      <button onclick="pinPress('4')">4</button><button onclick="pinPress('5')">5</button><button onclick="pinPress('6')">6</button>
-      <button onclick="pinPress('7')">7</button><button onclick="pinPress('8')">8</button><button onclick="pinPress('9')">9</button>
-      <button class="ghost" onclick="pinClear()">C</button><button onclick="pinPress('0')">0</button><button class="ghost" onclick="pinDel()">⌫</button>
+      <button onpointerdown="pinPress(event,'1')">1</button><button onpointerdown="pinPress(event,'2')">2</button><button onpointerdown="pinPress(event,'3')">3</button>
+      <button onpointerdown="pinPress(event,'4')">4</button><button onpointerdown="pinPress(event,'5')">5</button><button onpointerdown="pinPress(event,'6')">6</button>
+      <button onpointerdown="pinPress(event,'7')">7</button><button onpointerdown="pinPress(event,'8')">8</button><button onpointerdown="pinPress(event,'9')">9</button>
+      <button class="ghost" onpointerdown="pinClear(event)">C</button><button onpointerdown="pinPress(event,'0')">0</button><button class="ghost" onpointerdown="pinDel(event)">⌫</button>
     </div>
   </div>
 </div>
@@ -368,9 +368,9 @@ async function loadPhoto(id,sz='w600'){
 async function loadPhotoFull(id){return loadPhoto(id,'w2000');}
 
 // ── PIN ──
-function pinPress(d){if(state.pin.length>=6)return;state.pin+=d;renderDots();if(state.pin.length===6)submitPin();}
-function pinDel(){state.pin=state.pin.slice(0,-1);renderDots();}
-function pinClear(){state.pin='';renderDots();}
+function pinPress(ev,d){if(ev&&ev.preventDefault)ev.preventDefault();if(state.pin.length>=6)return;state.pin+=d;renderDots();if(state.pin.length===6)submitPin();}
+function pinDel(ev){if(ev&&ev.preventDefault)ev.preventDefault();state.pin=state.pin.slice(0,-1);renderDots();}
+function pinClear(ev){if(ev&&ev.preventDefault)ev.preventDefault();state.pin='';renderDots();}
 function renderDots(){document.querySelectorAll('#pinDots span').forEach((s,i)=>s.classList.toggle('on',i<state.pin.length));}
 async function submitPin(){
   document.getElementById('pinError').textContent='';
