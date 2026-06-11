@@ -51,7 +51,7 @@ body{margin:0;font-family:-apple-system,"Segoe UI","Sukhumvit Set","Noto Sans Th
 .entry-meta{font-size:12px;color:var(--muted);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap}
 .entry-photos{display:flex;gap:6px;margin-top:10px;overflow-x:auto}
 .entry-photos img{height:90px;border-radius:12px;object-fit:cover;background:var(--pink-soft);min-width:90px}
-.entry-thumb{height:90px;width:90px;border-radius:12px;object-fit:cover;background:var(--pink-soft);float:right;margin-left:10px}
+.entry-thumb{height:90px;width:90px;border-radius:12px;object-fit:cover;background:var(--pink-soft);flex-shrink:0}
 .mood-badge{font-size:20px}
 .empty{text-align:center;color:var(--muted);padding:60px 20px}.empty .big{font-size:48px}
 .section-title{font-size:13px;color:var(--muted);margin:4px 0 12px;font-weight:600}
@@ -391,11 +391,15 @@ async function loadThrowbackStories(){
 function entryCard(e){
   const firstPhoto=e.photoIds&&e.photoIds.length?`<img class="entry-thumb" data-photo="${e.photoIds[0]}" alt="">`:'';
   return `<div class="entry" onclick="openDetail('${e.id}')">
-    <div class="entry-date">${e.mood?`<span class="mood-badge">${e.mood}</span> `:''}${isoDate(e.entryDate)}</div>
-    ${firstPhoto}
-    ${e.title?`<div class="entry-title">${esc(e.title)}</div>`:''}
-    ${e.body?`<div class="entry-body">${esc(e.body)}</div>`:''}
-    ${e.location?`<div class="entry-meta">📍 ${esc(e.location)}</div>`:''}
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <div class="entry-date">${e.mood?`<span class="mood-badge">${e.mood}</span> `:''}${thDate(isoDate(e.entryDate))}</div>
+        ${e.title?`<div class="entry-title">${esc(e.title)}</div>`:''}
+        ${e.body?`<div class="entry-body">${esc(e.body)}</div>`:''}
+        ${e.location?`<div class="entry-meta">📍 ${esc(e.location)}</div>`:''}
+      </div>
+      ${firstPhoto}
+    </div>
   </div>`;
 }
 
