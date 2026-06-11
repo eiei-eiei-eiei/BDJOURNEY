@@ -227,7 +227,10 @@ function uploadPhotos_(photos, entryId) {
   var folder = DriveApp.getFolderById(PROP.getProperty('DRIVE_FOLDER_ID'));
   return photos.map(function (ph) {
     var blob = Utilities.newBlob(Utilities.base64Decode(ph.data), ph.mimeType, entryId + '_' + ph.name);
-    return folder.createFile(blob).getId();
+    var file = folder.createFile(blob);
+    // share เป็น public-link เพื่อให้ frontend ดึง thumbnail ผ่าน Drive CDN ได้โดยตรง (ไม่ผ่าน GAS)
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return file.getId();
   });
 }
 function getPhotoData_(token, fileId) {
