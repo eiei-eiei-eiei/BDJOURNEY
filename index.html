@@ -235,6 +235,10 @@ body{margin:0;font-family:-apple-system,"Segoe UI",sans-serif;background:var(--p
     </div>
     <label>Story</label><textarea id="f_body" rows="7" placeholder="Write your story..."></textarea>
     <label>Location (optional)</label><input type="text" id="f_location" placeholder="e.g. Coffee shop, Beach...">
+    <div id="gpsStatus" style="font-size:12px;color:var(--muted);margin-top:6px;display:flex;align-items:center;gap:8px">
+      <span id="gpsLabel">📍 No GPS</span>
+      <button type="button" onclick="captureGPS(true)" style="border:none;background:var(--pink-soft);color:var(--pink);padding:3px 10px;border-radius:12px;font-size:12px;cursor:pointer">Refresh GPS</button>
+    </div>
     <label>Photos</label><input type="file" id="f_photos" accept="image/*" multiple onchange="previewPhotos()">
     <div id="photoPreview" class="photo-preview"></div>
     <div id="existingPhotos" class="photo-preview"></div>
@@ -543,12 +547,14 @@ function openEditor(id){
     if(e.mood)document.querySelectorAll('#moodPicker span').forEach(s=>{if(s.textContent===e.mood)s.classList.add('sel');});
     state.existing=e.photoIds.slice();renderExisting();
     document.getElementById('f_lat').value=e.lat||'';document.getElementById('f_lng').value=e.lng||'';
+    setGpsLabel(e.lat,e.lng);
     document.getElementById('deleteBtn').classList.remove('hidden');
   }else{
     document.getElementById('editorTitle').textContent='New Entry';
     document.getElementById('f_id').value='';document.getElementById('f_date').value=todayIso();
     document.getElementById('f_title').value='';document.getElementById('f_body').value='';document.getElementById('f_location').value='';
     document.getElementById('f_lat').value='';document.getElementById('f_lng').value='';
+    setGpsLabel(null,null);
     document.getElementById('deleteBtn').classList.add('hidden');
     captureGPS();
   }
@@ -563,7 +569,11 @@ function previewPhotos(){
   files.forEach(file=>{
     if(typeof exifr!=='undefined'){
       exifr.gps(file).then(gps=>{
-        if(gps&&gps.latitude&&gps.longitude){document.getElementById('f_lat').value=gps.latitude;document.getElementById('f_lng').value=gps.longitude;}
+        if(gps&&gps.latitude&&gps.longitude){
+          document.getElementById('f_lat').value=gps.latitude;
+          document.getElementById('f_lng').value=gps.longitude;
+          setGpsLabel(gps.latitude,gps.longitude);
+        }
       }).catch(()=>{});
     }
     const reader=new FileReader();
@@ -680,12 +690,20 @@ async function renderAtlas(){
 function hideAtlas(){document.getElementById('app').classList.remove('atlas-active');document.getElementById('atlasMap').classList.remove('visible');}
 
 // ── GPS ──
-function captureGPS(){
+function setGpsLabel(lat,lng){
+  const el=document.getElementById('gpsLabel');if(!el)return;
+  el.textContent=lat&&lng?`📍 ${(+lat).toFixed(4)}, ${(+lng).toFixed(4)}`:'📍 No GPS';
+  el.style.color=lat&&lng?'var(--pink)':'var(--muted)';
+}
+function captureGPS(manual=false){
   if(!navigator.geolocation)return;
+  const el=document.getElementById('gpsLabel');if(el)el.textContent='📍 Getting GPS...';
   navigator.geolocation.getCurrentPosition(pos=>{
     document.getElementById('f_lat').value=pos.coords.latitude;
     document.getElementById('f_lng').value=pos.coords.longitude;
-  },()=>{});
+    setGpsLabel(pos.coords.latitude,pos.coords.longitude);
+  },()=>{if(el)el.textContent='📍 GPS denied';},
+  {timeout:10000,enableHighAccuracy:true});
 }
 </script>
 </body>
