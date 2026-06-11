@@ -73,6 +73,23 @@ body{margin:0;font-family:-apple-system,"Segoe UI",sans-serif;background:var(--p
 .section-title{font-size:13px;color:var(--muted);margin:4px 0 12px;font-weight:600}
 .day-divider{font-size:12px;color:var(--muted);font-weight:600;margin:18px 0 8px;text-align:center;letter-spacing:.5px}
 
+/* ── story viewer (IG-style) ── */
+.story-viewer{position:fixed;inset:0;background:#000;z-index:9999;display:flex;flex-direction:column;color:#fff;overflow:hidden}
+.sv-bars{display:flex;gap:3px;padding:8px 10px 0;padding-top:calc(env(safe-area-inset-top) + 8px);position:relative;z-index:3}
+.sv-bar{flex:1;height:2.5px;background:rgba(255,255,255,.35);border-radius:2px;overflow:hidden;min-width:4px}
+.sv-bar-fill{height:100%;background:#fff;width:0%;transition:width .05s linear}
+.sv-header{display:flex;justify-content:space-between;align-items:flex-start;padding:10px 14px 8px;position:relative;z-index:3;pointer-events:none}
+.sv-header .sv-close{pointer-events:auto}
+.sv-meta{flex:1;min-width:0}
+.sv-title{font-size:15px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sv-years{font-size:12px;opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.6);margin-top:2px}
+.sv-close{background:rgba(0,0,0,.3);border:none;color:#fff;font-size:22px;width:34px;height:34px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:10px}
+.sv-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1}
+.sv-textonly{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;z-index:1;background:linear-gradient(160deg,#ff7a9c,#ffb3c6);padding:40px 20px}
+.sv-overlay{position:absolute;inset:0;display:flex;z-index:2;transition:opacity .15s}
+.sv-zone{height:100%;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}
+.sv-zone-left{width:30%}.sv-zone-center{width:40%}.sv-zone-right{width:30%}
+
 /* ── story bar ── */
 .story-bar{display:flex;gap:12px;overflow-x:auto;padding:4px 16px 12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .story-bar::-webkit-scrollbar{display:none}
@@ -286,6 +303,28 @@ body{margin:0;font-family:-apple-system,"Segoe UI",sans-serif;background:var(--p
 </div>
 
 <!-- LIGHTBOX -->
+<!-- STORY VIEWER -->
+<div id="storyViewer" class="story-viewer hidden">
+  <div id="svBars" class="sv-bars"></div>
+  <div class="sv-header">
+    <div class="sv-meta">
+      <div id="svTitle" class="sv-title"></div>
+      <div id="svYears" class="sv-years"></div>
+    </div>
+    <button class="sv-close" onclick="closeStoryViewer()">✕</button>
+  </div>
+  <img id="svImg" class="sv-img" src="" alt="">
+  <div id="svTextOnly" class="sv-textonly hidden"></div>
+  <div id="svOverlay" class="sv-overlay">
+    <div class="sv-zone sv-zone-left"
+      onpointerdown="svPointerDown(event)" onpointerup="svPointerUp(event,'left')" onpointercancel="svPointerUp(event,'left')"></div>
+    <div class="sv-zone sv-zone-center"
+      onpointerdown="svPointerDown(event)" onpointerup="svPointerUp(event,'center')" onpointercancel="svPointerUp(event,'center')"></div>
+    <div class="sv-zone sv-zone-right"
+      onpointerdown="svPointerDown(event)" onpointerup="svPointerUp(event,'right')" onpointercancel="svPointerUp(event,'right')"></div>
+  </div>
+</div>
+
 <div id="lightbox" class="lightbox hidden">
   <button class="lightbox-close" onclick="closeLightbox()">✕</button>
   <button class="lightbox-prev" onclick="lightboxMove(-1)">‹</button>
@@ -347,6 +386,7 @@ window.addEventListener('load',()=>{
 // ── Android back button ──
 window.addEventListener('popstate',()=>{
   // close overlays from top to bottom
+  if(!document.getElementById('storyViewer').classList.contains('hidden')){closeStoryViewer(false);history.pushState({app:true},'');return;}
   if(!document.getElementById('lightbox').classList.contains('hidden')){closeLightbox(false);history.pushState({app:true},'');return;}
   if(!document.getElementById('mapPickerModal').classList.contains('hidden')){document.getElementById('mapPickerModal').classList.add('hidden');history.pushState({modal:'editor'},'');return;}
   if(!document.getElementById('dayModal').classList.contains('hidden')){closeDayModal(false);history.pushState({app:true},'');return;}
@@ -414,17 +454,138 @@ async function loadThrowbackStories(){
     const list=await apiGet('throwbacks');
     if(!list.items||!list.items.length)return;
     const bar=document.getElementById('storyBar');if(!bar)return;
+    // จัดกลุ่มตามปี (yearsAgo)
+    const byYear={};
     list.items.forEach(e=>{
-      const item=document.createElement('div');item.className='story-item';item.onclick=()=>openDetail(e.id);
-      const fp=e.photoIds&&e.photoIds.length?e.photoIds[0]:null;
-      item.innerHTML=`<div class="story-ring">${fp?`<img data-photo="${fp}" alt="">`:
-        `<div class="story-emoji">${e.mood||'📸'}</div>`}</div>
-        <span class="story-label">${e.yearsAgo}y ago</span>`;
-      bar.appendChild(item);
       if(!state.entries.find(x=>x.id===e.id))state.entries.push(e);
+      (byYear[e.yearsAgo]=byYear[e.yearsAgo]||[]).push(e);
+    });
+    // เรียง: ใหม่สุด (1y) ซ้ายสุด → เก่าสุด ขวาสุด
+    const years=Object.keys(byYear).map(Number).sort((a,b)=>a-b);
+    state.throwbackYears=years.map(y=>({yearsAgo:y,entries:byYear[y]}));
+    years.forEach(y=>{
+      const entries=byYear[y];
+      // thumbnail: รูปแรกของ entry แรกที่มีรูป ไม่งั้นใช้ emoji
+      const e0=entries.find(e=>e.photoIds&&e.photoIds.length)||entries[0];
+      const fp=e0.photoIds&&e0.photoIds.length?e0.photoIds[0]:null;
+      const item=document.createElement('div');item.className='story-item';
+      item.onclick=()=>openStoryViewer(y);
+      item.innerHTML=`<div class="story-ring">${fp?`<img data-photo="${fp}" alt="">`:
+        `<div class="story-emoji">${e0.mood||'📸'}</div>`}</div>
+        <span class="story-label">${y}y ago</span>`;
+      bar.appendChild(item);
     });
     hydratePhotos(bar);
   }catch(e){}
+}
+
+// ── Story Viewer (IG-style) ──
+function openStoryViewer(startYear){
+  // สร้าง flat slides list ตั้งแต่ startYear ไปปีที่เก่ากว่า
+  const allYears=state.throwbackYears||[];
+  const startIdx=allYears.findIndex(g=>g.yearsAgo===startYear);
+  if(startIdx<0)return;
+  const slides=[];
+  allYears.slice(startIdx).forEach(g=>{
+    g.entries.forEach(e=>{
+      if(e.photoIds&&e.photoIds.length){
+        e.photoIds.forEach(pid=>slides.push({entry:e,photoId:pid,yearsAgo:g.yearsAgo}));
+      }else{
+        slides.push({entry:e,photoId:null,yearsAgo:g.yearsAgo});
+      }
+    });
+  });
+  if(!slides.length)return;
+  state.story={slides,idx:0,paused:false,timer:null,startTs:0,elapsed:0};
+  document.getElementById('storyViewer').classList.remove('hidden');
+  history.pushState({modal:'story'},'');
+  renderStorySlide();
+}
+
+function renderStorySlide(){
+  const s=state.story;if(!s)return;
+  const slide=s.slides[s.idx];
+  // progress bars
+  const bars=s.slides.map((_,i)=>{
+    const fill=i<s.idx?100:i===s.idx?0:0;
+    return `<div class="sv-bar"><div class="sv-bar-fill" id="svBar${i}" style="width:${fill}%"></div></div>`;
+  }).join('');
+  document.getElementById('svBars').innerHTML=bars;
+  // content
+  const img=document.getElementById('svImg');
+  if(slide.photoId){
+    img.style.display='block';img.src='';
+    loadPhotoFull(slide.photoId).then(d=>{if(state.story&&s.slides[s.idx]===slide)img.src=d;});
+    document.getElementById('svTextOnly').classList.add('hidden');
+  }else{
+    img.style.display='none';
+    document.getElementById('svTextOnly').classList.remove('hidden');
+    document.getElementById('svTextOnly').innerHTML=`<div style="font-size:48px">${slide.entry.mood||'📝'}</div>
+      <div style="font-size:18px;font-weight:600;margin-top:14px;padding:0 24px">${esc(slide.entry.title||'')}</div>
+      <div style="font-size:14px;margin-top:10px;padding:0 24px;line-height:1.5;opacity:.9;max-width:500px">${esc((slide.entry.body||'').substring(0,180))}</div>`;
+  }
+  document.getElementById('svTitle').textContent=slide.entry.title||'(no title)';
+  document.getElementById('svYears').textContent=`${slide.yearsAgo} year${slide.yearsAgo>1?'s':''} ago`;
+  startStoryTimer();
+}
+
+function startStoryTimer(){
+  const s=state.story;if(!s)return;
+  clearInterval(s.timer);
+  s.startTs=Date.now();s.elapsed=0;
+  const DURATION=5000;
+  const bar=document.getElementById('svBar'+s.idx);
+  s.timer=setInterval(()=>{
+    if(s.paused)return;
+    const now=Date.now();
+    s.elapsed+=now-s.startTs;s.startTs=now;
+    const pct=Math.min(100,(s.elapsed/DURATION)*100);
+    if(bar)bar.style.width=pct+'%';
+    if(s.elapsed>=DURATION)storyNext();
+  },50);
+}
+
+function storyNext(){
+  const s=state.story;if(!s)return;
+  clearInterval(s.timer);
+  if(s.idx>=s.slides.length-1){closeStoryViewer();return;}
+  s.idx++;renderStorySlide();
+}
+function storyPrev(){
+  const s=state.story;if(!s)return;
+  clearInterval(s.timer);
+  // reset current bar
+  const cb=document.getElementById('svBar'+s.idx);if(cb)cb.style.width='0%';
+  if(s.idx===0){startStoryTimer();return;}
+  s.idx--;renderStorySlide();
+}
+function storyPause(){const s=state.story;if(!s)return;s.paused=true;document.getElementById('svOverlay').style.opacity='0';}
+function storyResume(){const s=state.story;if(!s)return;s.paused=false;s.startTs=Date.now();document.getElementById('svOverlay').style.opacity='1';}
+function storyOpenEntry(){
+  const s=state.story;if(!s)return;
+  const id=s.slides[s.idx].entry.id;
+  closeStoryViewer();
+  setTimeout(()=>openDetail(id),50);
+}
+function closeStoryViewer(pushBack=true){
+  if(state.story){clearInterval(state.story.timer);state.story=null;}
+  document.getElementById('storyViewer').classList.add('hidden');
+  if(pushBack)history.back();
+}
+
+// gestures
+let _svHoldTimer=null,_svHoldFired=false;
+function svPointerDown(ev){
+  ev.preventDefault();
+  _svHoldFired=false;
+  _svHoldTimer=setTimeout(()=>{_svHoldFired=true;storyPause();},200);
+}
+function svPointerUp(ev,zone){
+  clearTimeout(_svHoldTimer);
+  if(_svHoldFired){storyResume();return;}
+  if(zone==='left')storyPrev();
+  else if(zone==='right')storyNext();
+  else storyOpenEntry();
 }
 function entryCard(e){
   const n=e.photoIds&&e.photoIds.length;
