@@ -276,7 +276,23 @@ function getSheet_(name) { return SpreadsheetApp.openById(PROP.getProperty('SPRE
 function readAll_(name) {
   var sh = getSheet_(name), last = sh.getLastRow();
   if (last < 2) return [];
-  return sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+  // อ่านอย่างน้อยตาม ENTRY_COLS เพื่อให้ row[10], row[11] ไม่ undefined แม้ชีทมีแค่ 10 คอลัม
+  var cols = Math.max(sh.getLastColumn(), name === SHEET_ENTRIES ? ENTRY_COLS.length : 1);
+  return sh.getRange(2, 1, last - 1, cols).getValues();
+}
+
+/** รันครั้งเดียวหลัง deploy เพื่อเติม header lat/lng ที่ขาดไป */
+function fixEntryHeaders() {
+  var sh = getSheet_(SHEET_ENTRIES);
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  if (headers.length < ENTRY_COLS.length) {
+    for (var i = headers.length; i < ENTRY_COLS.length; i++) {
+      sh.getRange(1, i + 1).setValue(ENTRY_COLS[i]);
+    }
+    Logger.log('เติม header: ' + ENTRY_COLS.slice(headers.length).join(', '));
+  } else {
+    Logger.log('Header ครบแล้ว: ' + headers.join(', '));
+  }
 }
 function ensureSheet_(ss, name, headers) {
   var sh = ss.getSheetByName(name) || ss.insertSheet(name);

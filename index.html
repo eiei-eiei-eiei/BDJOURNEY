@@ -235,14 +235,28 @@ body{margin:0;font-family:-apple-system,"Segoe UI",sans-serif;background:var(--p
     </div>
     <label>Story</label><textarea id="f_body" rows="7" placeholder="Write your story..."></textarea>
     <label>Location (optional)</label><input type="text" id="f_location" placeholder="e.g. Coffee shop, Beach...">
-    <div id="gpsStatus" style="font-size:12px;color:var(--muted);margin-top:6px">
-      <span id="gpsLabel">📍 GPS will be read from photo</span>
+    <div id="gpsStatus" style="font-size:12px;margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span id="gpsLabel" style="color:var(--muted)">📍 GPS will be read from photo</span>
+      <button type="button" id="pickMapBtn" onclick="openMapPicker()" style="border:none;background:var(--pink-soft);color:var(--pink);padding:3px 10px;border-radius:12px;font-size:12px;cursor:pointer;flex-shrink:0">📍 Pick on map</button>
+      <button type="button" id="clearGpsBtn" onclick="clearGps()" class="hidden" style="border:none;background:#ffe0e6;color:#e8456b;padding:3px 8px;border-radius:12px;font-size:12px;cursor:pointer;flex-shrink:0">✕ Clear</button>
     </div>
     <label>Photos</label><input type="file" id="f_photos" accept="image/*" multiple onchange="previewPhotos()">
     <div id="photoPreview" class="photo-preview"></div>
     <div id="existingPhotos" class="photo-preview"></div>
     <div class="row-btns">
       <button id="deleteBtn" class="danger hidden" onclick="removeEntry()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAP PICKER -->
+<div id="mapPickerModal" class="sheet hidden">
+  <div class="sheet-card" style="height:82vh;display:flex;flex-direction:column;border-radius:24px 24px 0 0;overflow:hidden">
+    <div class="sheet-head">Pick Location<button class="x" onclick="closeMapPicker()">✕</button></div>
+    <div id="mapPickerMap" style="flex:1;min-height:0"></div>
+    <div style="padding:12px 16px calc(16px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--pink-soft)">
+      <div id="mapPickerCoords" style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:10px">Tap on map to drop a pin</div>
+      <button id="mapPickerConfirm" onclick="confirmMapPicker()" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--pink);color:#fff;font-size:15px;font-weight:600;cursor:pointer" disabled>Confirm</button>
     </div>
   </div>
 </div>
@@ -318,6 +332,7 @@ window.addEventListener('load',()=>{
 window.addEventListener('popstate',()=>{
   // close overlays from top to bottom
   if(!document.getElementById('lightbox').classList.contains('hidden')){closeLightbox(false);history.pushState({app:true},'');return;}
+  if(!document.getElementById('mapPickerModal').classList.contains('hidden')){closeMapPicker(false);history.pushState({app:true},'');return;}
   if(!document.getElementById('dayModal').classList.contains('hidden')){closeDayModal(false);history.pushState({app:true},'');return;}
   if(!document.getElementById('editor').classList.contains('hidden')){closeEditor(false);history.pushState({app:true},'');return;}
   if(!document.getElementById('detail').classList.contains('hidden')){closeDetail(false);history.pushState({app:true},'');return;}
@@ -695,8 +710,74 @@ function hideAtlas(){document.getElementById('app').classList.remove('atlas-acti
 // ── GPS ──
 function setGpsLabel(lat,lng){
   const el=document.getElementById('gpsLabel');if(!el)return;
-  if(lat&&lng){el.textContent=`📍 ${(+lat).toFixed(4)}, ${(+lng).toFixed(4)}`;el.style.color='var(--pink)';}
-  else{el.textContent='📍 GPS will be read from photo';el.style.color='var(--muted)';}
+  const clearBtn=document.getElementById('clearGpsBtn');
+  if(lat&&lng){
+    el.textContent=`📍 ${(+lat).toFixed(4)}, ${(+lng).toFixed(4)}`;
+    el.style.color='var(--pink)';
+    if(clearBtn)clearBtn.classList.remove('hidden');
+  }else{
+    el.textContent='📍 GPS will be read from photo';
+    el.style.color='var(--muted)';
+    if(clearBtn)clearBtn.classList.add('hidden');
+  }
+}
+function clearGps(){
+  document.getElementById('f_lat').value='';
+  document.getElementById('f_lng').value='';
+  setGpsLabel(null,null);
+}
+
+// ── Map Picker ──
+let _pickerMap=null,_pickerMarker=null,_pickerLat=null,_pickerLng=null;
+async function openMapPicker(){
+  document.getElementById('mapPickerModal').classList.remove('hidden');
+  document.getElementById('mapPickerConfirm').disabled=true;
+  document.getElementById('mapPickerCoords').textContent='Tap on map to drop a pin';
+  history.pushState({modal:'mapPicker'},'');
+  await loadLeaflet();
+  setTimeout(()=>{
+    if(!_pickerMap){
+      _pickerMap=L.map('mapPickerMap',{zoomControl:true});
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(_pickerMap);
+      _pickerMap.on('click',e=>{
+        _pickerLat=e.latlng.lat;_pickerLng=e.latlng.lng;
+        if(_pickerMarker)_pickerMarker.setLatLng(e.latlng);
+        else _pickerMarker=L.marker(e.latlng,{draggable:true}).addTo(_pickerMap);
+        _pickerMarker.on('dragend',ev=>{
+          _pickerLat=ev.target.getLatLng().lat;_pickerLng=ev.target.getLatLng().lng;
+          document.getElementById('mapPickerCoords').textContent=`${_pickerLat.toFixed(5)}, ${_pickerLng.toFixed(5)}`;
+        });
+        document.getElementById('mapPickerCoords').textContent=`${_pickerLat.toFixed(5)}, ${_pickerLng.toFixed(5)}`;
+        document.getElementById('mapPickerConfirm').disabled=false;
+      });
+    }
+    // ถ้ามีพิกัดเดิมอยู่แล้ว ให้เด้งไปที่นั่น
+    const curLat=+document.getElementById('f_lat').value;
+    const curLng=+document.getElementById('f_lng').value;
+    if(curLat&&curLng){
+      _pickerMap.setView([curLat,curLng],14);
+      _pickerLat=curLat;_pickerLng=curLng;
+      if(_pickerMarker)_pickerMarker.setLatLng([curLat,curLng]);
+      else _pickerMarker=L.marker([curLat,curLng],{draggable:true}).addTo(_pickerMap);
+      document.getElementById('mapPickerCoords').textContent=`${curLat.toFixed(5)}, ${curLng.toFixed(5)}`;
+      document.getElementById('mapPickerConfirm').disabled=false;
+    } else {
+      // เด้งไปประเทศไทยเป็น default
+      _pickerMap.setView([13.7563,100.5018],6);
+    }
+    _pickerMap.invalidateSize();
+  },100);
+}
+function closeMapPicker(pushState=true){
+  document.getElementById('mapPickerModal').classList.add('hidden');
+  if(pushState)history.back();
+}
+function confirmMapPicker(){
+  if(_pickerLat===null)return;
+  document.getElementById('f_lat').value=_pickerLat;
+  document.getElementById('f_lng').value=_pickerLng;
+  setGpsLabel(_pickerLat,_pickerLng);
+  closeMapPicker();
 }
 </script>
 </body>
