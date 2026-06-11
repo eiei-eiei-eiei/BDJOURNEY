@@ -524,7 +524,9 @@ function renderStorySlide(){
       <div style="font-size:18px;font-weight:600;margin-top:14px;padding:0 24px">${esc(slide.entry.title||'')}</div>
       <div style="font-size:14px;margin-top:10px;padding:0 24px;line-height:1.5;opacity:.9;max-width:500px">${esc((slide.entry.body||'').substring(0,180))}</div>`;
   }
-  document.getElementById('svTitle').textContent=slide.entry.title||'(no title)';
+  const tEl=document.getElementById('svTitle');
+  if(slide.entry.title){tEl.textContent=slide.entry.title;tEl.style.display='';}
+  else tEl.style.display='none';
   document.getElementById('svYears').textContent=`${slide.yearsAgo} year${slide.yearsAgo>1?'s':''} ago`;
   startStoryTimer();
 }
