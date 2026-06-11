@@ -797,8 +797,7 @@ function onMapSearch(q){
   if(!q.trim()){box.style.display='none';return;}
   _searchTimer=setTimeout(async()=>{
     try{
-      const res=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&accept-language=th,en`,
-        {headers:{'User-Agent':'BDJourney-App/1.0'}});
+      const res=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&accept-language=th,en`);
       const items=await res.json();
       if(!items.length){box.innerHTML='<div style="padding:12px;text-align:center;color:var(--muted);font-size:13px">No results</div>';box.style.display='block';return;}
       box.innerHTML=items.map(r=>`
