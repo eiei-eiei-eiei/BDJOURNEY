@@ -16,7 +16,7 @@
 var PROP = PropertiesService.getScriptProperties();
 var SHEET_ENTRIES = 'Entries';
 var SHEET_ANNIV  = 'Anniversaries';
-var ENTRY_COLS = ['id', 'entryDate', 'createdAt', 'updatedAt', 'title', 'body', 'mood', 'weather', 'location', 'photoIds'];
+var ENTRY_COLS = ['id', 'entryDate', 'createdAt', 'updatedAt', 'title', 'body', 'mood', 'weather', 'location', 'photoIds', 'lat', 'lng'];
 var ANNIV_COLS = ['id', 'title', 'date', 'recurring', 'remindDaysBefore', 'note'];
 
 // ============================================================
@@ -150,7 +150,8 @@ function addEntry_(token, p) {
   var now = new Date(), id = Utilities.getUuid();
   var photoIds = uploadPhotos_(p.photos, id);
   sh.appendRow([id, p.entryDate || formatDate_(now), now.getTime(), now.getTime(),
-    p.title || '', p.body || '', p.mood || '', p.weather || '', p.location || '', photoIds.join(',')]);
+    p.title || '', p.body || '', p.mood || '', p.weather || '', p.location || '', photoIds.join(','),
+    p.lat || '', p.lng || '']);
   return { id: id, photoIds: photoIds };
 }
 
@@ -163,7 +164,9 @@ function updateEntry_(token, p) {
       var merged = String(data[r][9] || '').split(',').filter(String).concat(uploadPhotos_(p.photos, p.id));
       sh.getRange(r + 1, 1, 1, ENTRY_COLS.length).setValues([[
         p.id, p.entryDate, data[r][2], new Date().getTime(),
-        p.title || '', p.body || '', p.mood || '', p.weather || '', p.location || '', merged.join(',')
+        p.title || '', p.body || '', p.mood || '', p.weather || '', p.location || '', merged.join(','),
+        p.lat !== undefined ? (p.lat || '') : (data[r][10] || ''),
+        p.lng !== undefined ? (p.lng || '') : (data[r][11] || '')
       ]]);
       return { photoIds: merged };
     }
@@ -278,9 +281,11 @@ function ensureSheet_(ss, name, headers) {
   return sh;
 }
 function rowToEntry_(row) {
-  return { id: row[0], entryDate: row[1], createdAt: Number(row[2]) || 0, updatedAt: Number(row[3]) || 0,
+  return { id: row[0], entryDate: formatDate_(row[1]), createdAt: Number(row[2]) || 0, updatedAt: Number(row[3]) || 0,
     title: row[4], body: row[5], mood: row[6], weather: row[7], location: row[8],
-    photoIds: String(row[9] || '').split(',').filter(String) };
+    photoIds: String(row[9] || '').split(',').filter(String),
+    lat: row[10] ? Number(row[10]) : null,
+    lng: row[11] ? Number(row[11]) : null };
 }
 function rowToAnniv_(row) {
   return { id: row[0], title: row[1], date: formatDate_(row[2]),
