@@ -457,19 +457,16 @@ function openEditor(id){
     document.getElementById('f_location').value=e.location||'';state.mood=e.mood||'';
     if(e.mood)document.querySelectorAll('#moodPicker span').forEach(s=>{if(s.textContent===e.mood)s.classList.add('sel');});
     state.existing=e.photoIds.slice();renderExisting();
+    document.getElementById('f_lat').value=e.lat||'';
+    document.getElementById('f_lng').value=e.lng||'';
     document.getElementById('deleteBtn').classList.remove('hidden');
   }else{
     document.getElementById('editorTitle').textContent='บันทึกใหม่';
     document.getElementById('f_id').value='';document.getElementById('f_date').value=todayIso();
     document.getElementById('f_title').value='';document.getElementById('f_body').value='';document.getElementById('f_location').value='';
+    document.getElementById('f_lat').value='';document.getElementById('f_lng').value='';
     document.getElementById('deleteBtn').classList.add('hidden');
-  }
-  document.getElementById('f_lat').value='';
-  document.getElementById('f_lng').value='';
-  if(!id) captureGPS(); // จับ GPS เฉพาะตอนสร้างใหม่
-  else{
-    document.getElementById('f_lat').value=e.lat||'';
-    document.getElementById('f_lng').value=e.lng||'';
+    captureGPS();
   }
   document.getElementById('editor').classList.remove('hidden');
 }

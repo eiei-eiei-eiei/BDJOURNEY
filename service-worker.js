@@ -3,7 +3,7 @@
  *  - cache app shell (offline เปิดได้)
  *  - ไม่ cache request ไป API (ข้อมูลต้องสด) — รูปแยก cache ใน IndexedDB ฝั่งแอปอยู่แล้ว
  */
-const CACHE = 'ourdiary-v1';
+const CACHE = 'ourdiary-v2';
 const SHELL = [
   '.', 'index.html', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png'
