@@ -680,7 +680,7 @@ function renderCalendar(){
       const info=byDay[d],iso=state.calYear+'-'+pad(m+1)+'-'+pad(d),isT=iso===today;
       c+=info
         ?`<div class="cal-cell has${isT?' today':''}" onclick="openDay(${state.calYear},${m+1},${d})">${info.fp?`<img data-photo="${info.fp}" alt="">`:''}<span class="cal-num">${d}</span></div>`
-        :`<div class="cal-cell${isT?' today':''}">${d}</div>`;
+        :`<div class="cal-cell${isT?' today':''}" style="cursor:pointer" onclick="newEntryOnDate('${iso}')">${d}</div>`;
     }
     html+=`<div class="cal-month-block" id="cal-m-${m}"><div class="cal-month-label">${MN[m]} ${state.calYear}</div><div class="cal-grid">${c}</div></div>`;
   }
@@ -730,6 +730,10 @@ document.addEventListener('keydown',e=>{
 });
 
 // ── Editor ──
+function newEntryOnDate(iso){
+  openEditor();
+  document.getElementById('f_date').value=iso;
+}
 function openEditor(id, skipPush=false){
   state.newPhotos=[];state.existing=[];state.mood='';state.editId=id||null;
   document.getElementById('photoPreview').innerHTML='';document.getElementById('existingPhotos').innerHTML='';
