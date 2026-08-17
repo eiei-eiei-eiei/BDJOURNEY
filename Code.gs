@@ -37,6 +37,7 @@ function handle_(e, p) {
     var result;
     switch (action) {
       // public
+      case 'ping':         result = { pong: true }; break; // warmup — ให้ GAS อุ่นเครื่องก่อนผู้ใช้พิมพ์ PIN เสร็จ
       case 'login':        result = login_(p.pin); break;
       // protected (ต้องมี token)
       case 'bootstrap':    result = bootstrap_(p.token); break;       // ดึง entries+anniv ครั้งเดียว

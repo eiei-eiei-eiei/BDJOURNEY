@@ -378,13 +378,32 @@ function pinClear(ev){if(ev&&ev.preventDefault)ev.preventDefault();state.pin='';
 function renderDots(){document.querySelectorAll('#pinDots span').forEach((s,i)=>s.classList.toggle('on',i<state.pin.length));}
 async function submitPin(){
   document.getElementById('pinError').textContent='';
-  try{const d=await apiGet('login',{pin:state.pin});state.token=d.token;unlock();}
-  catch(e){document.getElementById('pinError').textContent='Incorrect PIN';state.pin='';renderDots();navigator.vibrate&&navigator.vibrate(200);}
+  const keypad=document.querySelector('.keypad');if(keypad)keypad.style.pointerEvents='none';
+  showLoading(true);
+  // timeout 25 วิ (เผื่อ GAS cold start)
+  const ctl=new AbortController();
+  const to=setTimeout(()=>ctl.abort(),25000);
+  try{
+    const q=new URLSearchParams({action:'login',pin:state.pin});
+    const r=await fetch(API_URL+'?'+q,{signal:ctl.signal});
+    const j=await r.json();
+    if(!j.ok)throw new Error(j.error);
+    state.token=j.data.token;unlock();
+  }catch(e){
+    const msg=e.name==='AbortError'?'Server slow — try again':'Incorrect PIN';
+    document.getElementById('pinError').textContent=msg;
+    state.pin='';renderDots();navigator.vibrate&&navigator.vibrate(200);
+  }finally{
+    clearTimeout(to);showLoading(false);
+    if(keypad)keypad.style.pointerEvents='';
+  }
 }
 function unlock(){document.getElementById('lock').classList.add('hidden');document.getElementById('app').classList.remove('hidden');history.replaceState({app:true},'');loadAll();}
 
 window.addEventListener('load',()=>{
   if('serviceWorker'in navigator)navigator.serviceWorker.register('service-worker.js').catch(()=>{});
+  // warmup ping — เรียก GAS ตอน lock screen โผล่ เพื่อ warm cold start ล่วงหน้า (fire-and-forget)
+  fetch(API_URL+'?action=ping').catch(()=>{});
 });
 
 // ── Android back button ──
