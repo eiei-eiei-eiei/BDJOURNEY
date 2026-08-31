@@ -7,10 +7,8 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <title>BDJourney</title>
-<script src="https://unpkg.com/exifr@7.1.3/dist/full.umd.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<!-- exifr (~1MB) + Leaflet CSS ย้ายไปโหลด on-demand ใน <script> ด้านล่าง
+     เดิมโหลดตรงนี้แล้วบล็อก render ตอนเปิดแอปทั้งที่ยังไม่ได้ใช้ -->
 <style>
 :root{--pink:#ff7a9c;--pink-soft:#ffd9e2;--pink-bg:#fff5f7;--ink:#3a2c30;--muted:#9a8a8f;--shadow:0 4px 18px rgba(255,122,156,.15)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -37,7 +35,7 @@ body{margin:0;font-family:-apple-system,"Segoe UI",sans-serif;background:var(--p
 .app{min-height:100vh;padding-bottom:calc(76px + env(safe-area-inset-bottom))}
 
 /* ── topbar ── */
-.topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;background:rgba(255,245,247,.92);backdrop-filter:blur(10px);min-height:calc(52px + env(safe-area-inset-top))}
+.topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;background:#fff5f7;min-height:calc(52px + env(safe-area-inset-top))}
 .brand{font-weight:700;color:var(--pink);font-size:18px;flex:1;transition:opacity .2s}
 .topbar-search-wrap{flex:1;display:none;align-items:center;gap:8px}
 .topbar-search-wrap input{flex:1;border:1.5px solid var(--pink);border-radius:22px;padding:7px 14px;font-size:15px;font-family:inherit;background:#fff;outline:none;color:var(--ink)}
@@ -356,6 +354,13 @@ async function apiPost(a,p={}){
   const j=await r.json();if(!j.ok)throw new Error(j.error);return j.data;
 }
 
+// ── Lazy libs ──
+// โหลด script/css จาก CDN แบบ on-demand — service worker cache ไว้ให้ตั้งแต่ครั้งแรกอยู่แล้ว
+function loadScript_(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);});}
+function loadCss_(href){return new Promise(res=>{const l=document.createElement('link');l.rel='stylesheet';l.href=href;l.onload=res;l.onerror=res;document.head.appendChild(l);});}
+let _exifrP=null;
+function loadExifr(){return _exifrP||(_exifrP=loadScript_('https://unpkg.com/exifr@7.1.3/dist/full.umd.js').then(()=>window.exifr));}
+
 // ── Photo cache ──
 let _db;
 function db(){return _db||(_db=new Promise((res,rej)=>{const q=indexedDB.open('ourdiary',1);q.onupgradeneeded=()=>q.result.createObjectStore('photos');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));}
@@ -419,6 +424,31 @@ window.addEventListener('popstate',()=>{
   // nothing open — stay in app
   history.pushState({app:true},'');
 });
+
+// ── App layer ──
+// ซ่อนชั้น timeline/แผนที่ทั้งก้อนตอนมี overlay เต็มจอเปิดอยู่
+// เหตุผล: overlay เป็นแค่ position:fixed ทับข้างบน ของข้างล่างยังอยู่ใน layout/paint tree
+// พอคีย์บอร์ดเด้งใน editor viewport จะ resize → browser relayout ทั้ง document (entry + รูปทุกใบ)
+// → พิมพ์หน่วง. display:none ตัดงานก้อนนั้นทิ้งทั้งหมด
+const FULLSCREEN_OVERLAYS=['detail','editor','storyViewer','lightbox'];
+let _appScrollY=0,_appHidden=false;
+function syncAppLayer(){
+  const anyOpen=FULLSCREEN_OVERLAYS.some(id=>!document.getElementById(id).classList.contains('hidden'));
+  if(anyOpen===_appHidden)return;
+  const app=document.getElementById('app'),map=document.getElementById('atlasMap');
+  if(anyOpen){
+    _appScrollY=window.scrollY;
+    app.style.display='none';map.style.display='none';
+    _appHidden=true;
+  }else{
+    app.style.display='';map.style.display='';   // คืนให้ class คุมเหมือนเดิม
+    _appHidden=false;
+    void app.offsetHeight;                        // บังคับ layout ก่อน เพื่อให้ scrollTo ทำงานถูก
+    window.scrollTo(0,_appScrollY);
+    // Leaflet วัดขนาดตอนถูกซ่อนไม่ได้ ต้องสั่งวัดใหม่หลังโผล่กลับมา
+    if(_map&&state.tab==='atlas')requestAnimationFrame(()=>_map.invalidateSize());
+  }
+}
 
 // ── Data ──
 function showLoading(b){document.getElementById('loading').classList.toggle('hidden',!b);}
@@ -527,6 +557,7 @@ function openStoryViewer(startYear){
   if(!slides.length)return;
   state.story={slides,idx:0,paused:false,timer:null,startTs:0,elapsed:0};
   document.getElementById('storyViewer').classList.remove('hidden');
+  syncAppLayer();
   history.pushState({modal:'story'},'');
   renderStorySlide();
 }
@@ -601,6 +632,7 @@ function storyOpenEntry(){
 function closeStoryViewer(pushBack=true){
   if(state.story){clearInterval(state.story.timer);state.story=null;}
   document.getElementById('storyViewer').classList.add('hidden');
+  syncAppLayer();
   if(pushBack)history.back();
 }
 
@@ -659,12 +691,14 @@ function openDetail(id){
       <button class="danger" onclick="removeEntryFromDetail('${e.id}')">Delete entry</button>
     </div>`;
   document.getElementById('detail').classList.remove('hidden');
+  syncAppLayer();
   document.getElementById('detailBody').scrollTop=0;
   hydratePhotos(document.getElementById('detailBody'));
   history.pushState({modal:'detail'},'');
 }
 function closeDetail(pushState=true){
   document.getElementById('detail').classList.add('hidden');
+  syncAppLayer();
   if(pushState)history.back();
 }
 function editFromDetail(){
@@ -741,6 +775,7 @@ async function openLightbox(entryId,idx){
   const e=state.entries.find(x=>x.id===entryId);if(!e||!e.photoIds.length)return;
   _lb.ids=e.photoIds;_lb.idx=idx;
   document.getElementById('lightbox').classList.remove('hidden');
+  syncAppLayer();
   await showLightboxPhoto(idx);
   history.pushState({modal:'lightbox'},'');
 }
@@ -752,7 +787,7 @@ async function showLightboxPhoto(idx){
   document.querySelector('.lightbox-next').style.visibility=idx<_lb.ids.length-1?'visible':'hidden';
 }
 async function lightboxMove(dir){const n=_lb.idx+dir;if(n<0||n>=_lb.ids.length)return;_lb.idx=n;await showLightboxPhoto(n);}
-function closeLightbox(pushState=true){document.getElementById('lightbox').classList.add('hidden');if(pushState)history.back();}
+function closeLightbox(pushState=true){document.getElementById('lightbox').classList.add('hidden');syncAppLayer();if(pushState)history.back();}
 document.addEventListener('keydown',e=>{
   if(document.getElementById('lightbox').classList.contains('hidden'))return;
   if(e.key==='ArrowLeft')lightboxMove(-1);if(e.key==='ArrowRight')lightboxMove(1);if(e.key==='Escape')closeLightbox();
@@ -789,29 +824,28 @@ function openEditor(id, skipPush=false){
     document.getElementById('deleteBtn').classList.add('hidden');
   }
   document.getElementById('editor').classList.remove('hidden');
+  syncAppLayer();
   if(!skipPush)history.pushState({modal:'editor'},'');
 }
-function closeEditor(pushState=true){document.getElementById('editor').classList.add('hidden');if(pushState)history.back();}
+function closeEditor(pushState=true){document.getElementById('editor').classList.add('hidden');syncAppLayer();if(pushState)history.back();}
 function pickMood(el,m){document.querySelectorAll('#moodPicker span').forEach(s=>s.classList.remove('sel'));if(state.mood===m){state.mood='';}else{state.mood=m;el.classList.add('sel');}}
 function previewPhotos(){
   const files=Array.from(document.getElementById('f_photos').files);
   document.getElementById('f_photos').value='';
   files.forEach(file=>{
     // ดึง GPS จาก EXIF (เฉพาะรูปแรกที่มี GPS เท่านั้น ไม่ทับของเดิมถ้ามีอยู่แล้ว)
-    if(typeof exifr!=='undefined'){
-      exifr.gps(file).then(gps=>{
-        console.log('[EXIF]',file.name,gps);
-        const hasExisting=document.getElementById('f_lat').value;
-        if(gps&&gps.latitude&&gps.longitude&&!hasExisting){
-          document.getElementById('f_lat').value=gps.latitude;
-          document.getElementById('f_lng').value=gps.longitude;
-          setGpsLabel(gps.latitude,gps.longitude);
-          toast('📍 GPS read from photo');
-        }else if(!gps||!gps.latitude){
-          console.log('[EXIF] no GPS in',file.name);
-        }
-      }).catch(err=>console.log('[EXIF error]',err));
-    }
+    loadExifr().then(ex=>ex.gps(file)).then(gps=>{
+      console.log('[EXIF]',file.name,gps);
+      const hasExisting=document.getElementById('f_lat').value;
+      if(gps&&gps.latitude&&gps.longitude&&!hasExisting){
+        document.getElementById('f_lat').value=gps.latitude;
+        document.getElementById('f_lng').value=gps.longitude;
+        setGpsLabel(gps.latitude,gps.longitude);
+        toast('📍 GPS read from photo');
+      }else if(!gps||!gps.latitude){
+        console.log('[EXIF] no GPS in',file.name);
+      }
+    }).catch(err=>console.log('[EXIF error]',err));
     const reader=new FileReader();
     reader.onload=ev=>{
       const idx=state.newPhotos.length;
@@ -877,12 +911,16 @@ function onSearch(q){
 }
 
 // ── Atlas ──
-let _leafletLoaded=false;
-async function loadLeaflet(){
-  if(_leafletLoaded)return;
-  await new Promise(res=>{const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';s.onload=res;document.head.appendChild(s);});
-  await new Promise(res=>{const s=document.createElement('script');s.src='https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';s.onload=res;document.head.appendChild(s);});
-  _leafletLoaded=true;
+let _leafletP=null;
+function loadLeaflet(){
+  if(_leafletP)return _leafletP;
+  // CSS ต้องมาก่อน map ถูกสร้าง ไม่งั้น Leaflet วัดขนาด container ผิด
+  return _leafletP=Promise.all([
+    loadCss_('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'),
+    loadCss_('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css'),
+    loadCss_('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css')
+  ]).then(()=>loadScript_('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'))
+    .then(()=>loadScript_('https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js'));
 }
 let _map=null,_clusterGroup=null;
 async function renderAtlas(){
