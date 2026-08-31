@@ -362,17 +362,57 @@ let _exifrP=null;
 function loadExifr(){return _exifrP||(_exifrP=loadScript_('https://unpkg.com/exifr@7.1.3/dist/full.umd.js').then(()=>window.exifr));}
 
 // ── Photo cache ──
+// v2: เก็บเป็น Blob แทน base64 string
+// เดิม string base64 ใหญ่กว่าไฟล์จริง 1.33 เท่า และค้างทั้งใน JS heap + DOM attribute
+// พร้อมกัน ทำให้ RAM บนมือถือบวมจน GC ทำงานตลอด → ทั้งแอปหน่วง
+// Blob + objectURL ให้ browser จัดการเอง ปล่อย bitmap ที่หลุดจอทิ้งได้
 let _db;
-function db(){return _db||(_db=new Promise((res,rej)=>{const q=indexedDB.open('ourdiary',1);q.onupgradeneeded=()=>q.result.createObjectStore('photos');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));}
+function db(){return _db||(_db=new Promise((res,rej)=>{
+  const q=indexedDB.open('ourdiary',2);
+  q.onupgradeneeded=()=>{
+    const d=q.result;
+    // ของเดิมเป็น string คนละชนิดกัน — ล้างทิ้งรอบเดียว แล้วโหลดใหม่จาก Drive
+    if(d.objectStoreNames.contains('photos'))d.deleteObjectStore('photos');
+    d.createObjectStore('photos');
+  };
+  q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));}
 async function cacheGet(k){const d=await db();return new Promise(r=>{const t=d.transaction('photos').objectStore('photos').get(k);t.onsuccess=()=>r(t.result);t.onerror=()=>r(null);});}
 async function cacheSet(k,v){const d=await db();d.transaction('photos','readwrite').objectStore('photos').put(v,k);}
 function driveThumbUrl(id,sz='w600'){return`https://drive.google.com/thumbnail?id=${id}&sz=${sz}`;}
 function blobToDataUrl(b){return new Promise(r=>{const fr=new FileReader();fr.onload=e=>r(e.target.result);fr.readAsDataURL(b);});}
+function dataUrlToBlob_(u){
+  const s=String(u),i=s.indexOf(','),head=s.slice(0,i);
+  const mime=(head.match(/data:([^;]+)/)||[,'image/jpeg'])[1];
+  const bin=atob(s.slice(i+1)),arr=new Uint8Array(bin.length);
+  for(let j=0;j<bin.length;j++)arr[j]=bin.charCodeAt(j);
+  return new Blob([arr],{type:mime});
+}
+// objectURL registry — thumbnail อยู่ยาวทั้ง session (เล็กและถูกใช้ซ้ำทุก render)
+// ส่วนรูปเต็ม (w2000) กิน RAM หนัก เก็บแค่ 3 ล่าสุดแบบ LRU แล้ว revoke ทิ้ง
+const _thumbUrls=new Map(),_fullUrls=new Map(),FULL_URL_CAP=3;
+function objUrl_(k,blob,full){
+  const m=full?_fullUrls:_thumbUrls;
+  let u=m.get(k);
+  if(u){if(full){m.delete(k);m.set(k,u);}return u;}   // touch = ทำให้เป็นตัวล่าสุดของ LRU
+  u=URL.createObjectURL(blob);m.set(k,u);
+  if(full)while(m.size>FULL_URL_CAP){const old=m.keys().next().value;URL.revokeObjectURL(m.get(old));m.delete(old);}
+  return u;
+}
 async function loadPhoto(id,sz='w600'){
-  const k=id+'_'+sz,c=await cacheGet(k);if(c)return c;
-  try{const r=await fetch(driveThumbUrl(id,sz));if(r.ok){const u=await blobToDataUrl(await r.blob());await cacheSet(k,u);return u;}}catch(e){}
-  const cached=await cacheGet(id);if(cached)return cached;
-  const d=await apiGet('photo',{id});await cacheSet(id,d.data||d);return d.data||d;
+  const k=id+'_'+sz,full=sz!=='w600';
+  const hit=(full?_fullUrls:_thumbUrls).get(k);
+  if(hit)return objUrl_(k,null,full);
+  let blob=await cacheGet(k);
+  if(!blob){
+    try{const r=await fetch(driveThumbUrl(id,sz));if(r.ok)blob=await r.blob();}catch(e){}
+  }
+  if(!blob){
+    // fallback: ขอผ่าน GAS (คืนมาเป็น data URL) แล้วแปลงเป็น Blob ก่อนเก็บ
+    const d=await apiGet('photo',{id});
+    blob=dataUrlToBlob_(typeof d==='string'?d:(d.data||d));
+  }
+  await cacheSet(k,blob);
+  return objUrl_(k,blob,full);
 }
 async function loadPhotoFull(id){return loadPhoto(id,'w2000');}
 
@@ -667,10 +707,20 @@ function entryCard(e){
     </div>
   </div>`;
 }
+// โหลดรูปเฉพาะที่ใกล้เข้าจอ (เผื่อ 300px) — เดิมยิงทุกรูปในหน้าพร้อมกัน
+// timeline ที่มี 50 entry เท่ากับ decode bitmap 50 รูปรวดเดียวตั้งแต่ render เสร็จ
+const _photoIO=new IntersectionObserver(es=>{
+  es.forEach(e=>{if(e.isIntersecting){_photoIO.unobserve(e.target);fillPhoto_(e.target);}});
+},{rootMargin:'300px 0px'});
+async function fillPhoto_(img){
+  const id=img.getAttribute('data-photo');if(!id)return;
+  img.removeAttribute('data-photo');
+  try{img.src=await loadPhoto(id);}catch(e){}
+}
 function hydratePhotos(scope=document){
-  scope.querySelectorAll('img[data-photo]').forEach(async img=>{
-    const id=img.getAttribute('data-photo');img.removeAttribute('data-photo');
-    try{img.src=await loadPhoto(id);}catch(e){}
+  scope.querySelectorAll('img[data-photo]').forEach(img=>{
+    img.decoding='async';img.loading='lazy';
+    _photoIO.observe(img);
   });
 }
 
@@ -800,6 +850,8 @@ function newEntryOnDate(iso){
 }
 function openEditor(id, skipPush=false){
   state.newPhotos=[];state.existing=[];state.mood='';state.editId=id||null;
+  // เฉพาะ photoPreview เท่านั้นที่ revoke ได้ — existingPhotos ใช้ URL จาก registry ร่วมกับ timeline
+  revokeBlobImgs_(document.getElementById('photoPreview'));
   document.getElementById('photoPreview').innerHTML='';document.getElementById('existingPhotos').innerHTML='';
   document.getElementById('f_photos').value='';
   document.querySelectorAll('#moodPicker span').forEach(s=>s.classList.remove('sel'));
@@ -829,35 +881,67 @@ function openEditor(id, skipPush=false){
 }
 function closeEditor(pushState=true){document.getElementById('editor').classList.add('hidden');syncAppLayer();if(pushState)history.back();}
 function pickMood(el,m){document.querySelectorAll('#moodPicker span').forEach(s=>s.classList.remove('sel'));if(state.mood===m){state.mood='';}else{state.mood=m;el.classList.add('sel');}}
-function previewPhotos(){
+// ย่อรูปฝั่ง client ก่อนอัป — ลดพื้นที่ Drive, อัปเร็วขึ้น และที่สำคัญคือ
+// base64 ที่ค้างใน state.newPhotos เล็กลงมาก (ของเดิมรูป 12MP = base64 ~6MB ต่อรูป)
+const PHOTO_MAX_DIM=1600,PHOTO_QUALITY=.82;
+async function compressImage_(file){
+  if(!file.type||!file.type.startsWith('image/'))return file;
+  let bmp;
+  // imageOrientation:'from-image' กัน EXIF orientation หายตอนวาดลง canvas (รูปตะแคง)
+  try{bmp=await createImageBitmap(file,{imageOrientation:'from-image'});}
+  catch(e){try{bmp=await createImageBitmap(file);}catch(e2){return file;}}
+  const w=bmp.width,h=bmp.height,scale=Math.min(1,PHOTO_MAX_DIM/Math.max(w,h));
+  if(scale===1&&file.type==='image/jpeg'){bmp.close&&bmp.close();return file;} // เล็กอยู่แล้ว
+  const cw=Math.round(w*scale),ch=Math.round(h*scale);
+  const cv=document.createElement('canvas');cv.width=cw;cv.height=ch;
+  cv.getContext('2d').drawImage(bmp,0,0,cw,ch);
+  bmp.close&&bmp.close();
+  const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',PHOTO_QUALITY));
+  cv.width=cv.height=0;                          // ปล่อย backing store ของ canvas
+  if(!blob||blob.size>=file.size)return file;    // ย่อแล้วไม่เล็กลง ใช้ต้นฉบับ
+  return new File([blob],file.name.replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'});
+}
+async function previewPhotos(){
   const files=Array.from(document.getElementById('f_photos').files);
   document.getElementById('f_photos').value='';
-  files.forEach(file=>{
-    // ดึง GPS จาก EXIF (เฉพาะรูปแรกที่มี GPS เท่านั้น ไม่ทับของเดิมถ้ามีอยู่แล้ว)
-    loadExifr().then(ex=>ex.gps(file)).then(gps=>{
-      console.log('[EXIF]',file.name,gps);
-      const hasExisting=document.getElementById('f_lat').value;
-      if(gps&&gps.latitude&&gps.longitude&&!hasExisting){
-        document.getElementById('f_lat').value=gps.latitude;
-        document.getElementById('f_lng').value=gps.longitude;
-        setGpsLabel(gps.latitude,gps.longitude);
-        toast('📍 GPS read from photo');
-      }else if(!gps||!gps.latitude){
-        console.log('[EXIF] no GPS in',file.name);
-      }
-    }).catch(err=>console.log('[EXIF error]',err));
-    const reader=new FileReader();
-    reader.onload=ev=>{
+  if(!files.length)return;
+  showLoading(true);
+  try{
+    // ทีละไฟล์ ไม่ขนาน — กัน memory spike จากการ decode หลายรูปพร้อมกันบนมือถือ
+    for(const file of files){
+      // ดึง GPS จากไฟล์ *ต้นฉบับ* ก่อนย่อเสมอ เพราะ canvas ลบ EXIF ทิ้ง
+      loadExifr().then(ex=>ex.gps(file)).then(gps=>{
+        console.log('[EXIF]',file.name,gps);
+        const hasExisting=document.getElementById('f_lat').value;
+        if(gps&&gps.latitude&&gps.longitude&&!hasExisting){
+          document.getElementById('f_lat').value=gps.latitude;
+          document.getElementById('f_lng').value=gps.longitude;
+          setGpsLabel(gps.latitude,gps.longitude);
+          toast('📍 GPS read from photo');
+        }else if(!gps||!gps.latitude){
+          console.log('[EXIF] no GPS in',file.name);
+        }
+      }).catch(err=>console.log('[EXIF error]',err));
+      let f=file;
+      try{f=await compressImage_(file);}catch(err){console.log('[compress error]',err);}
       const idx=state.newPhotos.length;
-      state.newPhotos.push({name:file.name,mimeType:file.type,data:ev.target.result.split(',')[1]});
+      state.newPhotos.push({name:f.name,mimeType:f.type,data:(await blobToDataUrl(f)).split(',')[1]});
       const div=document.createElement('div');div.className='pp';
-      div.innerHTML=`<img src="${ev.target.result}"><button class="del" onclick="removeNewPhoto(${idx},this)">✕</button>`;
+      // preview ใช้ objectURL ไม่ใช่ data URL — ไม่ต้องแบก base64 ซ้ำอีกชุดใน DOM
+      div.innerHTML=`<img src="${URL.createObjectURL(f)}"><button class="del" onclick="removeNewPhoto(${idx},this)">✕</button>`;
       document.getElementById('photoPreview').appendChild(div);
-    };
-    reader.readAsDataURL(file);
-  });
+    }
+  }finally{showLoading(false);}
 }
-function removeNewPhoto(idx,btn){state.newPhotos[idx]=null;btn.parentElement.remove();}
+function removeNewPhoto(idx,btn){
+  state.newPhotos[idx]=null;
+  revokeBlobImgs_(btn.parentElement);
+  btn.parentElement.remove();
+}
+// คืน memory ของ objectURL ที่ผูกกับ <img> ในกล่องที่กำลังจะถูกทิ้ง
+function revokeBlobImgs_(scope){
+  scope.querySelectorAll('img').forEach(im=>{if(im.src.startsWith('blob:'))URL.revokeObjectURL(im.src);});
+}
 async function renderExisting(){
   const box=document.getElementById('existingPhotos');box.innerHTML='';
   state.existing.forEach(id=>{const div=document.createElement('div');div.className='pp';
