@@ -398,23 +398,31 @@ function objUrl_(k,blob,full){
   if(full)while(m.size>FULL_URL_CAP){const old=m.keys().next().value;URL.revokeObjectURL(m.get(old));m.delete(old);}
   return u;
 }
-async function loadPhoto(id,sz='w600'){
+// ⚠️ Drive thumbnail ไม่ส่ง header Access-Control-Allow-Origin
+// → fetch() โดน CORS บล็อก "ทุกครั้ง" (ยืนยันจาก console จริงบน production แล้ว)
+// ของเดิมจึงตกไป fallback = ขอผ่าน GAS แปลงเป็น base64 ทุกรูป ซึ่งช้ามาก
+// แต่ <img src> ไม่ติด CORS → ชี้ src ตรงไป Drive เลย ให้ HTTP cache ของ browser
+// จัดการ caching แทน. IndexedDB/Blob ด้านล่างเหลือไว้เป็นทางสำรองอย่างเดียว
+async function loadPhoto(id,sz='w600'){return driveThumbUrl(id,sz);}
+async function loadPhotoFull(id){return driveThumbUrl(id,'w2000');}
+
+// ผูก src ให้ <img> พร้อมทางสำรอง: ถ้า Drive โหลดไม่ขึ้น (เช่นไฟล์ยังไม่ถูก share
+// เป็น public-link) ค่อยขอผ่าน GAS ซึ่งช้ากว่ามาก จึงใช้เฉพาะตอนจำเป็น
+function setPhotoSrc_(img,id,sz='w600'){
+  img.onerror=()=>{img.onerror=null;loadPhotoViaApi_(id,sz).then(u=>{if(u)img.src=u;}).catch(()=>{});};
+  img.src=driveThumbUrl(id,sz);
+}
+async function loadPhotoViaApi_(id,sz='w600'){
   const k=id+'_'+sz,full=sz!=='w600';
-  const hit=(full?_fullUrls:_thumbUrls).get(k);
-  if(hit)return objUrl_(k,null,full);
+  if((full?_fullUrls:_thumbUrls).get(k))return objUrl_(k,null,full);
   let blob=await cacheGet(k);
   if(!blob){
-    try{const r=await fetch(driveThumbUrl(id,sz));if(r.ok)blob=await r.blob();}catch(e){}
-  }
-  if(!blob){
-    // fallback: ขอผ่าน GAS (คืนมาเป็น data URL) แล้วแปลงเป็น Blob ก่อนเก็บ
     const d=await apiGet('photo',{id});
     blob=dataUrlToBlob_(typeof d==='string'?d:(d.data||d));
   }
   await cacheSet(k,blob);
   return objUrl_(k,blob,full);
 }
-async function loadPhotoFull(id){return loadPhoto(id,'w2000');}
 
 // ── PIN ──
 function pinPress(ev,d){if(ev&&ev.preventDefault)ev.preventDefault();if(state.pin.length>=6)return;state.pin+=d;renderDots();if(state.pin.length===6)submitPin();}
@@ -614,8 +622,9 @@ function renderStorySlide(){
   // content
   const img=document.getElementById('svImg');
   if(slide.photoId){
-    img.style.display='block';img.src='';
-    loadPhotoFull(slide.photoId).then(d=>{if(state.story&&s.slides[s.idx]===slide)img.src=d;});
+    // ตั้ง src ตรง ๆ ได้เลย ไม่ต้องรอ async จึงไม่มีเคสผลลัพธ์เก่ามาทับสไลด์ใหม่
+    img.style.display='block';
+    setPhotoSrc_(img,slide.photoId,'w2000');
     document.getElementById('svTextOnly').classList.add('hidden');
   }else{
     img.style.display='none';
@@ -712,10 +721,10 @@ function entryCard(e){
 const _photoIO=new IntersectionObserver(es=>{
   es.forEach(e=>{if(e.isIntersecting){_photoIO.unobserve(e.target);fillPhoto_(e.target);}});
 },{rootMargin:'300px 0px'});
-async function fillPhoto_(img){
+function fillPhoto_(img){
   const id=img.getAttribute('data-photo');if(!id)return;
   img.removeAttribute('data-photo');
-  try{img.src=await loadPhoto(id);}catch(e){}
+  setPhotoSrc_(img,id);
 }
 function hydratePhotos(scope=document){
   scope.querySelectorAll('img[data-photo]').forEach(img=>{
@@ -831,8 +840,8 @@ async function openLightbox(entryId,idx){
 }
 async function showLightboxPhoto(idx){
   const img=document.getElementById('lightboxImg');img.style.opacity='.4';
-  try{img.src=await loadPhotoFull(_lb.ids[idx]);}catch(e){}
-  img.style.opacity='1';
+  img.onload=()=>{img.style.opacity='1';};
+  setPhotoSrc_(img,_lb.ids[idx],'w2000');
   document.querySelector('.lightbox-prev').style.visibility=idx>0?'visible':'hidden';
   document.querySelector('.lightbox-next').style.visibility=idx<_lb.ids.length-1?'visible':'hidden';
 }
