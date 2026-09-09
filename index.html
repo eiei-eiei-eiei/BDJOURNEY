@@ -503,6 +503,7 @@ function showLoading(b){document.getElementById('loading').classList.toggle('hid
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
 async function refreshData(){
   const btn=document.getElementById('refreshBtn');if(btn)btn.classList.add('spinning');
+  _throwbackP=null;   // ให้ปุ่ม Refresh ดึง throwback ใหม่ด้วย
   try{await loadAll();toast('Refreshed 💕');}
   catch(e){fail(e);}
   finally{if(btn)btn.classList.remove('spinning');}
@@ -556,9 +557,13 @@ async function renderTimeline(){
   hydratePhotos();
   if(!q)loadThrowbackStories();
 }
+// cache ทั้ง session — "วันนี้ในอดีต" ไม่เปลี่ยนระหว่างวัน แต่เดิมยิง GAS ใหม่
+// ทุกครั้งที่ renderTimeline (สลับแท็บ / เซฟ / ลบ / ล้างช่องค้นหา)
+// ปุ่ม Refresh จะล้าง cache นี้ให้เอง
+let _throwbackP=null;
 async function loadThrowbackStories(){
   try{
-    const list=await apiGet('throwbacks');
+    const list=await(_throwbackP||(_throwbackP=apiGet('throwbacks')));
     if(!list.items||!list.items.length)return;
     const bar=document.getElementById('storyBar');if(!bar)return;
     // จัดกลุ่มตามปี (yearsAgo)
@@ -769,7 +774,7 @@ function editFromDetail(){
 async function removeEntryFromDetail(id){
   if(!confirm('Delete this entry permanently?'))return;
   showLoading(true);
-  try{await apiPost('deleteEntry',{id});closeDetail();await loadAll();}
+  try{await apiPost('deleteEntry',{id});removeEntryLocally_(id);closeDetail();render();}
   catch(e){fail(e);}finally{showLoading(false);}
 }
 
@@ -973,15 +978,43 @@ async function saveEntry(){
   const hasExisting=state.existing&&state.existing.length;
   if(!payload.body&&!payload.title&&!payload.location&&!payload.photos.length&&!hasExisting){toast('Add something first 💕');return;}
   showLoading(true);document.getElementById('saveBtn').disabled=true;
-  try{await apiPost(payload.id?'updateEntry':'addEntry',payload);closeEditor();await loadAll();toast('Saved 💕');}
+  try{
+    const res=await apiPost(payload.id?'updateEntry':'addEntry',payload);
+    // เดิม: await loadAll() = ยิง GAS รอบที่ 2 ดึง entry ทั้งหมดกลับมาใหม่ ทั้งที่รู้ผลอยู่แล้ว
+    // ตอนนี้ patch state ในเครื่องจากที่ backend คืนมา → ตัด round trip ไป 1 รอบเต็ม ๆ
+    const ok=applyEntryLocally_(payload,res);
+    closeEditor();
+    if(ok)render();else await loadAll();   // หา entry ไม่เจอ (คนอื่นลบไปแล้ว?) ค่อยดึงใหม่
+    toast('Saved 💕');
+  }
   catch(e){fail(e);}finally{document.getElementById('saveBtn').disabled=false;showLoading(false);}
+}
+// อัปเดต state.entries ในเครื่องให้ตรงกับที่เพิ่งเซฟ — รูปแบบต้องตรงกับ rowToEntry_ ใน Code.gs
+function applyEntryLocally_(p,res){
+  const ids=(res&&res.photoIds)||[];
+  const num=v=>(v===''||v===null||v===undefined)?null:Number(v);
+  const now=Date.now();
+  if(p.id){
+    const e=state.entries.find(x=>x.id===p.id);
+    if(!e)return false;
+    Object.assign(e,{entryDate:p.entryDate,title:p.title||'',body:p.body||'',mood:p.mood||'',
+      weather:'',location:p.location||'',photoIds:ids,lat:num(p.lat),lng:num(p.lng),updatedAt:now});
+  }else{
+    state.entries.push({id:res.id,entryDate:p.entryDate,createdAt:now,updatedAt:now,
+      title:p.title||'',body:p.body||'',mood:p.mood||'',weather:'',location:p.location||'',
+      photoIds:ids,lat:num(p.lat),lng:num(p.lng)});
+    // เรียงให้เหมือน bootstrap_: วันที่ใหม่สุดก่อน, วันเดียวกันดู createdAt
+    state.entries.sort((a,b)=>a.entryDate===b.entryDate?b.createdAt-a.createdAt:(a.entryDate<b.entryDate?1:-1));
+  }
+  return true;
 }
 async function removeEntry(){
   if(!confirm('Delete this entry permanently?'))return;
   showLoading(true);
-  try{await apiPost('deleteEntry',{id:state.editId});closeEditor();await loadAll();}
+  try{const id=state.editId;await apiPost('deleteEntry',{id});removeEntryLocally_(id);closeEditor();render();}
   catch(e){fail(e);}finally{showLoading(false);}
 }
+function removeEntryLocally_(id){state.entries=state.entries.filter(x=>x.id!==id);}
 
 // ── Search ──
 function toggleSearch(){
